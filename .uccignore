@@ -1,0 +1,2 @@
+lib/**/*.pyc
+lib/charset_normalizer/*.so
