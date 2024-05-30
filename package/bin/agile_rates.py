@@ -125,7 +125,7 @@ class AGILE_RATES(BaseModInput):
             method = "GET"
             response = helper.send_http_request(url, method, parameters=None, payload=None,
                                                 headers=None, cookies=None, verify=True, cert=None,
-                                                timeout=None, use_proxy=True)
+                                                timeout=30, use_proxy=False)
             response.raise_for_status()
             r_json = response.json()
             helper.log_debug(response.content)

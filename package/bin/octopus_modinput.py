@@ -80,7 +80,8 @@ class OctopusModInput(BaseModInput):
 
     def get_new_access_token(self):
         request = {
-            'verify' : False,
+            'verify' : True,
+            timeout: 30,
             "headers" : {
                 'Content-Type':  'application/json'
             },
@@ -127,7 +128,8 @@ class OctopusModInput(BaseModInput):
         access_token = access_token if not access_token is None else self.account_config['access_token']
 
         request = {
-            'verify' : False,
+            'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : access_token,
                 'Content-Type':  'application/json'
@@ -144,7 +146,8 @@ class OctopusModInput(BaseModInput):
     def get_kracken_account_info(self, access_token=None):
         access_token = access_token if not access_token is None else self.account_config['access_token']
         request = {
-            'verify' : False,
+            'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : access_token,
                 'Content-Type':  'application/json'
@@ -166,6 +169,7 @@ class OctopusModInput(BaseModInput):
 
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : self.account_config['access_token'],
                 'Content-Type':  'application/json'
@@ -216,6 +220,7 @@ class OctopusModInput(BaseModInput):
 
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : self.account_config['access_token'],
                 'Content-Type':  'application/json'
@@ -236,16 +241,13 @@ class OctopusModInput(BaseModInput):
         }
 
         try:
-            self.log_warning(request)
             response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
             jsonResp = response.json()
-            self.log_warning(response.content)
             if 'data' in jsonResp and f"{type}Dispatches" in jsonResp['data']:
                 for resp in jsonResp['data'][f"{type}Dispatches"]:
                     yield resp
             else:
-                self.log_critical(f"No {type}Dispatches data received")
-                self.log_warning(response.content)
+                self.log_info(f"No {type}Dispatches data received")
         except(Exception) as e:
             import traceback
             import sys
@@ -298,7 +300,8 @@ class OctopusModInput(BaseModInput):
         self.account = accountName
         access_token = self.get_access_token()
         request = {
-            'verify' : False,
+            'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'Authorization': 'Bearer ' + access_token,
                 'Content-Type':  'application/json'
@@ -317,7 +320,7 @@ class OctopusModInput(BaseModInput):
                 "payload":data,
                 "verify":False
             }
-            r = self.send_http_request(uri,"POST", headers=headers, payload=data, verify=False)
+            r = self.send_http_request(uri,"POST", headers=headers, payload=data, verify=True, timeout=30)
             if r.status_code<300:
                 self.log_info("Logged message to UI")
             else:

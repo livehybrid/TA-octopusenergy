@@ -4,7 +4,7 @@
     <panel>
       <chart>
         <search>
-          <query>`octopus_index` sourcetype="octopusenergy:meter_reading" | dedup _time | timechart sum(consumption) AS consumptionKW</query>
+          <query>`octopus_index` sourcetype="octopusenergy:meter_reading:*" | dedup _time | timechart sum(consumption) AS consumptionKW by source</query>
           <earliest>0</earliest>
           <sampleRatio>1</sampleRatio>
         </search>
@@ -46,7 +46,7 @@
     <panel>
       <table>
         <search>
-          <query>`octopus_index` sourcetype="octopusenergy:meter_reading" | dedup _time | sort 0 - consumption | head 1 | eval text="Most consumption on "+interval_start+" consumed="+consumption+"kw" | table text</query>
+          <query>`octopus_index` sourcetype="octopusenergy:meter_reading*" | dedup _time | sort 0 - consumption | head 1 | eval text="Most consumption on "+interval_start+" consumed="+consumption+"kw" | table text</query>
           <earliest>0</earliest>
           <sampleRatio>1</sampleRatio>
         </search>
