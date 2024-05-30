@@ -81,6 +81,7 @@ class OctopusModInput(BaseModInput):
     def get_new_access_token(self):
         request = {
             'verify' : True,
+            timeout: 30,
             "headers" : {
                 'Content-Type':  'application/json'
             },
@@ -128,6 +129,7 @@ class OctopusModInput(BaseModInput):
 
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : access_token,
                 'Content-Type':  'application/json'
@@ -145,6 +147,7 @@ class OctopusModInput(BaseModInput):
         access_token = access_token if not access_token is None else self.account_config['access_token']
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : access_token,
                 'Content-Type':  'application/json'
@@ -166,6 +169,7 @@ class OctopusModInput(BaseModInput):
 
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : self.account_config['access_token'],
                 'Content-Type':  'application/json'
@@ -216,6 +220,7 @@ class OctopusModInput(BaseModInput):
 
         request = {
             'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'authorization' : self.account_config['access_token'],
                 'Content-Type':  'application/json'
@@ -295,7 +300,8 @@ class OctopusModInput(BaseModInput):
         self.account = accountName
         access_token = self.get_access_token()
         request = {
-            'verify' : False,
+            'verify' : True,
+            'timeout' : 30,
             "headers" : {
                 'Authorization': 'Bearer ' + access_token,
                 'Content-Type':  'application/json'
@@ -314,7 +320,7 @@ class OctopusModInput(BaseModInput):
                 "payload":data,
                 "verify":False
             }
-            r = self.send_http_request(uri,"POST", headers=headers, payload=data, verify=False)
+            r = self.send_http_request(uri,"POST", headers=headers, payload=data, verify=True, timeout=30)
             if r.status_code<300:
                 self.log_info("Logged message to UI")
             else:
