@@ -108,7 +108,7 @@ class METER_READINGS(OctopusModInput):
             headers = { "Authorization" : self.account_config['access_token']}
             response = self.send_http_request(url, method, parameters=None, payload=None,
                                                 headers=headers, cookies=None, verify=True, cert=None,
-                                                timeout=None, use_proxy=True)
+                                                timeout=30, use_proxy=True)
             response.raise_for_status()
             r_json = response.json()
 

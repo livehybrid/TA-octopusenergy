@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: "pip"
-    directories: 
+    directories:
       - "/"
       - "/package/lib/"
     schedule:
@@ -10,4 +10,10 @@ updates:
       splunk:
         applies-to: version-updates
         patterns:
-        - "splunk*"
+          - "splunk*"
+    open-pull-requests-limit: 10
+    target-branch: "develop"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
