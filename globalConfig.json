@@ -166,9 +166,7 @@
                   "pattern": "^[a-zA-Z][\\.\\@\\-\\w]+$"
                 }
               ],
-              "options": {
-                "placeholder": "you@youremail.com"
-              },
+              "help": "you@youremail.com",
               "defaultValue": "",
               "field": "name",
               "encrypted": false
@@ -177,9 +175,6 @@
               "type": "text",
               "label": "OctopusEnergy account password",
               "required": false,
-              "options": {
-                "placeholder": "*********"
-              },
               "defaultValue": "",
               "field": "account_password",
               "encrypted": true
@@ -188,18 +183,14 @@
               "type": "text",
               "label": "Account Number",
               "required": false,
-              "options": {
-                "placeholder": "Leave Blank - Autopopulated on save"
-              },
+              "help": "Leave Blank - Autopopulated on save",
               "field": "account_number"
             },
             {
               "type": "text",
               "label": "Refresh Token",
               "required": false,
-              "options": {
-                "placeholder": "Leave Blank - Autopopulated on save"
-              },
+              "help": "Leave Blank - Autopopulated on save",
               "defaultValue": "",
               "field": "refresh_token",
               "encrypted": true
@@ -208,9 +199,8 @@
               "type": "text",
               "label": "Access Token",
               "required": false,
-              "options": {
-                "placeholder": "Leave Blank - Autopopulated on save"
-              },
+              "options": {},
+              "help": "Leave Blank - Autopopulated on save",
               "defaultValue": "",
               "field": "access_token",
               "encrypted": true
@@ -395,7 +385,6 @@
               "required": true,
               "options": {
                 "dependencies": ["account"],
-                "placeholder": "Select a meter",
                 "endpointUrl": "ta_octopusenergy_account_info",
                 "labelField": "metername"
               },
@@ -486,7 +475,6 @@
               "required": true,
               "options": {
                 "dependencies": ["account"],
-                "placeholder": "Select a meter",
                 "endpointUrl": "ta_octopusenergy_account_info",
                 "labelField": "metername"
               },
