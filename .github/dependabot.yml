@@ -1,6 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: "pip"
+    target-branch: "develop"
     directories:
       - "/"
       - "/package/lib/"
@@ -14,6 +15,7 @@ updates:
     open-pull-requests-limit: 10
     target-branch: "develop"
   - package-ecosystem: "github-actions"
+    target-branch: "develop"
     directory: "/"
     schedule:
       interval: "weekly"
