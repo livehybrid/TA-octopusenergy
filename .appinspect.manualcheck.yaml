@@ -24,3 +24,5 @@ check_for_binary_files_without_source_code:
     comment: 'Manual Check - Binary files without source code'
 check_for_data_persistence:
     comment: 'Manual Check - Data Persistence'
+check_for_insecure_http_calls_in_python:
+    comment: 'Manual Check - Insecure HTTP calls in python'
