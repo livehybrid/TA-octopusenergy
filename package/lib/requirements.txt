@@ -1,2 +1,2 @@
-splunktaucclib>=6.2.0
+splunktaucclib>=6.5.3
 pyjwt
