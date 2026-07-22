@@ -89,8 +89,14 @@ def docker_exec(*cmd, timeout=180):
 
     Only meaningful on the docker/portainer backends where CONTAINER is a real
     container reachable from this host. Skips cleanly elsewhere.
+
+    Runs as the `splunk` user: modular-input scripts opened via `splunk cmd
+    python ... --scheme` import solnlib, which opens $SPLUNK_HOME/var/log/
+    python.log at import. Only the splunk user owns that path, so a bare
+    `docker exec` (image build-time user) dies with PermissionError before
+    emitting any scheme.
     """
-    full = ["docker", "exec", CONTAINER, *cmd]
+    full = ["docker", "exec", "-u", "splunk", CONTAINER, *cmd]
     p = subprocess.run(full, capture_output=True, text=True, timeout=timeout)
     return p.returncode, p.stdout, p.stderr
 
