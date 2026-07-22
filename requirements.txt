@@ -1,0 +1,12 @@
+#
+# Project-level requirements for building, testing and packaging TA-octopusenergy.
+# Runtime lib versions are pinned for the Splunk Python 3.9 LTS runtime
+# (see package/lib/requirements.txt for the reasoning).
+#
+splunk-add-on-ucc-framework>=6.0.0
+splunk-appinspect>=3.6.0
+splunktaucclib>=8.2.0
+solnlib>=5.5.0
+splunk-sdk>=2.0.2,<3.0.0
+requests>=2.32.0,<2.33.0
+pyjwt
