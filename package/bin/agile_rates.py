@@ -6,6 +6,7 @@ import datetime
 from splunklib import modularinput as smi
 from splunktaucclib.modinput_wrapper.base_modinput import BaseModInput
 from splunktaucclib.splunk_aoblib.setup_util import Setup_Util
+from octopus_modinput import OCTOPUS_API_BASE
 
 class AGILE_RATES(BaseModInput):
 
@@ -120,7 +121,7 @@ class AGILE_RATES(BaseModInput):
             if end_dt-start_dt == 0:
                 helper.log_warning("Nothing to do!")
                 exit(0)
-            url="https://api.octopus.energy/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(rate_code,rate_code,start_dt.isoformat(), end_dt.isoformat())
+            url=OCTOPUS_API_BASE+"/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(rate_code,rate_code,start_dt.isoformat(), end_dt.isoformat())
             helper.log_debug(f"Getting url={url}")
             method = "GET"
             response = helper.send_http_request(url, method, parameters=None, payload=None,

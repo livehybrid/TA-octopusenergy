@@ -58,6 +58,11 @@ jobs:
           ucc-gen build --source package --ta-version 1.0.0
           rm -rf stage && mkdir -p stage
           cp -r output/TA-octopusenergy stage/TA-octopusenergy
+          # Point the collectors at the mock Kraken upstream via the app-local
+          # override file (splunkd does not pass the container env var to
+          # modular-input processes, so the file is the reliable seam).
+          mkdir -p stage/TA-octopusenergy/local
+          echo "http://mock:8080" > stage/TA-octopusenergy/local/octopus_api_base
           # The test container's splunk user (a different uid) must read the app
           # and write local/inputs.conf + checkpoints into the bind mount. Wide
           # perms are fine on this throwaway copy — it is never the artefact.
