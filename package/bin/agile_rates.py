@@ -6,11 +6,21 @@ import datetime
 from splunklib import modularinput as smi
 from splunktaucclib.modinput_wrapper.base_modinput import BaseModInput
 from splunktaucclib.splunk_aoblib.setup_util import Setup_Util
+from octopus_modinput import OCTOPUS_API_BASE
 
 class AGILE_RATES(BaseModInput):
 
     def __init__(self):
         super(AGILE_RATES, self).__init__("TA-octopusenergy", "agile_rates", False)
+
+    def get_app_name(self):
+        # BaseModInput.get_app_name is abstract and does `raise NotImplemented`,
+        # which is itself a bug in the vendored library: NotImplemented is not an
+        # exception, so calling it dies with "TypeError: exceptions must derive
+        # from BaseException" rather than a useful message. It is reached via the
+        # `app` property, which _init_ckpt() uses to name the KV store
+        # checkpointer, so any collector that checkpoints must override this.
+        return "TA-octopusenergy"
 
     def get_scheme(self):
         scheme = smi.Scheme('agile_rates')
@@ -75,6 +85,14 @@ class AGILE_RATES(BaseModInput):
         #     sourcetype='agile_rates',
         # )
         # ew.write_event(event)
+        # BaseModInput.stream_events normally does this, but we override it and
+        # never call super(), so context_meta stayed at its {} default from
+        # BaseModInput.__init__. _init_ckpt() reads server_uri/session_key off
+        # context_meta, so the first get_check_point() below raised
+        # "server_uri not found in input meta." and the input died before any
+        # API call. octopus_modinput.py's collectors were unaffected because
+        # their stream_events does set it.
+        self.context_meta = inputs.metadata
         uri = inputs.metadata["server_uri"]
         session_key = inputs.metadata['session_key']
         self.setup_util = Setup_Util(uri, session_key, self.logger)
@@ -84,7 +102,17 @@ class AGILE_RATES(BaseModInput):
             checkpoint_key = "start_time"
             start_time = helper.get_check_point(checkpoint_key)
             if not start_time:
-                start_time = input_item['start_date']
+                # start_date is optional in both globalConfig and the scheme
+                # (required_on_create=False, no default), so an input configured
+                # without one used to raise KeyError here on its very first run,
+                # before any checkpoint existed. Fall back to the start of today,
+                # which matches what the window logic below expects: it fetches
+                # forward a day from start_dt.
+                start_time = input_item.get('start_date')
+            if not start_time:
+                start_time = datetime.datetime.combine(
+                    datetime.date.today(), datetime.time(0, 0)
+                ).strftime("%Y-%m-%d %H:%M:%S")
             self.log_warning(f"start_time={start_time}")
             proxy_settings = helper.get_proxy()
             rate_code = input_item['rate_code']
@@ -120,7 +148,7 @@ class AGILE_RATES(BaseModInput):
             if end_dt-start_dt == 0:
                 helper.log_warning("Nothing to do!")
                 exit(0)
-            url="https://api.octopus.energy/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(rate_code,rate_code,start_dt.isoformat(), end_dt.isoformat())
+            url=OCTOPUS_API_BASE+"/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(rate_code,rate_code,start_dt.isoformat(), end_dt.isoformat())
             helper.log_debug(f"Getting url={url}")
             method = "GET"
             response = helper.send_http_request(url, method, parameters=None, payload=None,

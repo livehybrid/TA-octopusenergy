@@ -215,9 +215,6 @@
     "inputs": {
       "services": [
         {
-          "hook": {
-            "src": "Hook"
-          },
           "name": "agile_rates",
           "entity": [
             {
@@ -688,6 +685,7 @@
     "restRoot": "ta_octopusenergy",
     "version": "1.0.0R86590ab",
     "displayName": "Octopus Energy",
-    "schemaVersion": "2.0.0"
+    "schemaVersion": "2.0.0",
+    "supportedPythonVersion": ["3.9"]
   }
 }

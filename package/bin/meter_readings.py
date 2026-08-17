@@ -8,7 +8,7 @@ from splunktaucclib.modinput_wrapper.base_modinput import BaseModInput
 from splunktaucclib.splunk_aoblib.setup_util import Setup_Util
 from solnlib import conf_manager
 from base64 import b64encode
-from octopus_modinput import OctopusModInput
+from octopus_modinput import OctopusModInput, OCTOPUS_API_BASE
 APPNAME="TA-octopusenergy"
 
 class METER_READINGS(OctopusModInput):
@@ -101,7 +101,7 @@ class METER_READINGS(OctopusModInput):
                 meter_type_url_segment = ""
                 exit(1)
 
-            url=f"https://api.octopus.energy/v1/{meter_type_url_segment}/{mpan}/meters/{serial}/consumption/?period_from={start_dt.isoformat()}&period_to={end_dt.isoformat()}&page_size=25000"
+            url=f"{OCTOPUS_API_BASE}/v1/{meter_type_url_segment}/{mpan}/meters/{serial}/consumption/?period_from={start_dt.isoformat()}&period_to={end_dt.isoformat()}&page_size=25000"
             self.log_warning(f"Getting url={url}")
             method = "GET"
             self.load_account(input_item['account'])

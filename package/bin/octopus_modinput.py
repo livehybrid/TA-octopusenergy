@@ -9,6 +9,36 @@ import jwt
 import time
 import os
 
+
+def _resolve_api_base():
+    """Base URL for the Octopus (Kraken) API.
+
+    Resolution order (production is unaffected — both overrides are absent in a
+    normal install, so it falls through to the real API):
+      1. OCTOPUS_API_BASE env var (e.g. an enterprise API gateway).
+      2. a `local/octopus_api_base` file in the app. splunkd does not reliably
+         pass env vars to modular-input processes, so the integration harness
+         writes this file to point the collectors at a mock Kraken upstream.
+      3. the real Octopus API.
+    """
+    env = os.environ.get("OCTOPUS_API_BASE")
+    if env:
+        return env.rstrip("/")
+    override = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "local", "octopus_api_base")
+    try:
+        with open(override) as fh:
+            val = fh.read().strip()
+        if val:
+            return val.rstrip("/")
+    except OSError:
+        pass
+    return "https://api.octopus.energy"
+
+
+OCTOPUS_API_BASE = _resolve_api_base()
+OCTOPUS_GRAPHQL_URL = f"{OCTOPUS_API_BASE}/v1/graphql/"
+
+
 class OctopusModInput(BaseModInput):
     appName = "TA-octopusenergy"
     restPath = "ta_octopusenergy"
@@ -81,7 +111,7 @@ class OctopusModInput(BaseModInput):
     def get_new_access_token(self):
         request = {
             'verify' : True,
-            timeout: 30,
+            'timeout': 30,
             "headers" : {
                 'Content-Type':  'application/json'
             },
@@ -96,7 +126,7 @@ class OctopusModInput(BaseModInput):
                 "query":"mutation Login($input: ObtainJSONWebTokenInput!) { obtainKrakenToken(input: $input) { refreshExpiresIn refreshToken token } }"
             }
         }
-        response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
+        response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
         response_obj = response.json()
         refresh_token = response_obj['data']['obtainKrakenToken']['refreshToken']
         refreshExpiresIn = response_obj['data']['obtainKrakenToken']['refreshExpiresIn']
@@ -140,7 +170,7 @@ class OctopusModInput(BaseModInput):
                 "query":"query GetUser { viewer { id preferredName givenName email accounts { number } } }"
             }
         }
-        response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
+        response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
         return response.json()['data']
 
     def get_kracken_account_info(self, access_token=None):
@@ -161,7 +191,7 @@ class OctopusModInput(BaseModInput):
                 "query":"query GetAccountInfo($accountNumber: String!, $propertiesActiveFrom: DateTime) { account(accountNumber: $accountNumber) { accountType status number balance billingName canRequestRefund canRenewTariff projectedBalance shouldReviewPayments recommendedBalanceAdjustment ledgers { ledgerType balance } maximumRefund { amount reasonToRecommendAmount recommendedBalance } activeReferralSchemes { domestic { canBeReferred referralUrl referralDisplayUrl combinedRewardAmount referrerRewardAmount referredRewardAmount } business { canBeReferred referralUrl referralDisplayUrl combinedRewardAmount referrerRewardAmount referredRewardAmount } } paymentSchedules(first: 1, canCreatePayment: true) { edges { node { id paymentAmount paymentDay validTo validFrom isVariablePaymentAmount isPaymentHoliday reason totalDebtAmount } } } bills(first: 1, includeBillsWithoutPDF: false) { edges { node { id billType fromDate toDate issuedDate temporaryUrl } } } payments(first: 1) { edges { node { id amount paymentDate transactionType } } } properties(activeFrom: $propertiesActiveFrom) { id address postcode occupancyPeriods { effectiveFrom effectiveTo } coordinates { latitude longitude } smartDeviceNetworks { smartDevices { model deviceId status type paymentMode importElectricityMeter { id meterPoint { mpan } serialNumber installationDate consumptionUnits } gasMeter { meterPoint { mprn } id serialNumber installationDate consumptionUnits } } } electricityMeterPoints { __typename mpan id gspGroupId meters(includeInactive: false) { id serialNumber makeAndType meterType importMeter { id } smartDevices { paymentMode deviceId } prepayLedgers { creditLedger { currentBalance } debtLedger { currentBalance } } } agreements { id validFrom validTo tariff { __typename ... on TariffType { standingCharge preVatStandingCharge displayName fullName } ... on StandardTariff { unitRate preVatUnitRate } ... on DayNightTariff { dayRate preVatDayRate nightRate preVatNightRate } ... on HalfHourlyTariff { unitRates { value validFrom validTo } } } } enrolment { status supplyStartDate switchStartDate previousSupplier } smartStartDate smartTariffOnboarding { id lastUpdated latestStatus latestTermsStatus } status } gasMeterPoints { __typename mprn id meters { id serialNumber smartDevices { paymentMode deviceId } prepayLedgers { creditLedger { currentBalance } debtLedger { currentBalance } } } agreements { id validFrom validTo tariff { displayName fullName unitRate preVatUnitRate standingCharge preVatStandingCharge } } enrolment { status supplyStartDate switchStartDate previousSupplier } smartStartDate status } } } }"
             }
         }
-        response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
+        response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
         return response.json()['data']
 
 
@@ -191,7 +221,7 @@ class OctopusModInput(BaseModInput):
             }
         }
         try:
-            response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
+            response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
             jsonResp = response.json()
             if jsonResp and 'data' in jsonResp and 'smartMeterTelemetry' in jsonResp['data'] and jsonResp['data']['smartMeterTelemetry']:
                 for resp in jsonResp['data']['smartMeterTelemetry']:
@@ -241,7 +271,7 @@ class OctopusModInput(BaseModInput):
         }
 
         try:
-            response = self.send_http_request("https://api.octopus.energy/v1/graphql/", "POST", **request)
+            response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
             jsonResp = response.json()
             if 'data' in jsonResp and f"{type}Dispatches" in jsonResp['data']:
                 for resp in jsonResp['data'][f"{type}Dispatches"]:
