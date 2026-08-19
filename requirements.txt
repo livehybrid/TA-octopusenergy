@@ -4,9 +4,9 @@
 # (see package/lib/requirements.txt for the reasoning).
 #
 splunk-add-on-ucc-framework>=6.0.0
-splunk-appinspect>=3.6.0
+splunk-appinspect>=4.3.0
 splunktaucclib>=8.2.0
 solnlib>=5.5.0
-splunk-sdk>=2.0.2,<3.0.0
+splunk-sdk>=2.1.1,<3.0.0
 requests>=2.34.2,<2.35.0
 pyjwt
