@@ -16,9 +16,23 @@ discovery config; adding them is a follow-up.
 """
 from __future__ import annotations
 
+import os
 import time
+import urllib.parse
 
 import pytest
+
+# The mock Kraken runs on the TEST RUNNER. A remote Splunk (e.g. a live dev
+# instance reached over the network) cannot connect back to it, so the mock
+# tier only makes sense when Splunk is local to the runner (the CI docker
+# harness). Real-API coverage for remote runs lives in test_live_real.py.
+_mgmt_host = urllib.parse.urlparse(
+    os.environ.get("SPLUNK_MGMT_URL", "https://127.0.0.1:8089")
+).hostname or "127.0.0.1"
+pytestmark = pytest.mark.skipif(
+    _mgmt_host not in ("127.0.0.1", "localhost", "::1"),
+    reason="mock upstream runs on the test runner; a remote Splunk cannot reach it (CI covers this tier)",
+)
 
 APP = "TA-octopusenergy"
 NS = f"/servicesNS/nobody/{APP}"

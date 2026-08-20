@@ -128,9 +128,22 @@ class OctopusModInput(BaseModInput):
         }
         response = self.send_http_request(OCTOPUS_GRAPHQL_URL, "POST", **request)
         response_obj = response.json()
-        refresh_token = response_obj['data']['obtainKrakenToken']['refreshToken']
-        refreshExpiresIn = response_obj['data']['obtainKrakenToken']['refreshExpiresIn']
-        access_token = response_obj['data']['obtainKrakenToken']['token']
+        # Kraken signals auth failure as {"data": null, "errors": [...]} with
+        # HTTP 200 — surface the reason instead of crashing on the null.
+        token_payload = (response_obj.get('data') or {}).get('obtainKrakenToken')
+        if not token_payload:
+            errors = "; ".join(
+                e.get('message', 'unknown') for e in (response_obj.get('errors') or [])
+            ) or "no error detail returned"
+            self.log_error(
+                f"Octopus login failed for account={self.account}: {errors}. "
+                "The stored account password/API key is likely stale — update it "
+                "in the add-on's Configuration page."
+            )
+            raise RuntimeError(f"Octopus obtainKrakenToken failed: {errors}")
+        refresh_token = token_payload['refreshToken']
+        refreshExpiresIn = token_payload['refreshExpiresIn']
+        access_token = token_payload['token']
         self.log_info(f"New token for account={self.account} refreshExpiresIn={refreshExpiresIn}")
         temp_account_conf = self.account_conf.get(self.account)
         try:

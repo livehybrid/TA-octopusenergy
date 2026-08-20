@@ -5,12 +5,19 @@ on:
       - "**"
     tags:
       - "v*.*.*"
+  workflow_dispatch: {}
+  schedule:
+    # Weekly real-API canary - catches Octopus/Kraken drift without burning
+    # Actions minutes on every push.
+    - cron: "37 6 * * 1"
 permissions:
   pull-requests: write
   actions: write
   checks: write
 jobs:
   package:
+    # On the weekly schedule only the real-API canary runs.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Package app
@@ -89,6 +96,75 @@ jobs:
           docker exec $C /opt/splunk/bin/splunk search \
             'search index=_internal (source=*ta-octopusenergy* OR source=*ta_octopusenergy* OR component=ExecProcessor) (octopus OR OctopusEnergy) earliest=-15m | head 25 | table _time component _raw' \
             -auth admin:Changeme1! 2>&1 | head -40 || true
+
+      - name: Tear down
+        if: always()
+        working-directory: docker
+        run: docker compose down -v || true
+
+  live-real-api:
+    name: live-real-api (real Octopus)
+    # Real-API canary: agile rates through the real collector (public endpoint)
+    # plus a credential-validity check with the secret from 1Password. NON-
+    # gating and credit-conscious: weekly schedule, manual dispatch, main
+    # pushes and tags only.
+    if: >-
+      ${{ github.actor != 'dependabot[bot]' &&
+          (github.event_name == 'schedule' ||
+           github.event_name == 'workflow_dispatch' ||
+           github.ref == 'refs/heads/main' ||
+           startsWith(github.ref, 'refs/tags/')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install UCC framework + pytest
+        run: pip install --upgrade splunk-add-on-ucc-framework pytest
+
+      - name: Build add-on into stage/ (no mock override -> real API)
+        shell: bash
+        run: |
+          ucc-gen build --source package --ta-version 1.1.5
+          rm -rf stage && mkdir -p stage
+          cp -r output/TA-octopusenergy stage/TA-octopusenergy
+          chmod -R 777 stage/TA-octopusenergy
+
+      - name: Start Splunk (wait for health)
+        working-directory: docker
+        run: docker compose up -d --wait --wait-timeout 360
+
+      - name: Load Octopus credential from 1Password
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]; then
+            echo "OP_SERVICE_ACCOUNT_TOKEN unavailable - credential test will skip." >&2
+            exit 0
+          fi
+          curl -sSfL https://cache.agilebits.com/dist/1P/op2/pkg/v2.30.0/op_linux_amd64_v2.30.0.zip -o /tmp/op.zip
+          (cd /tmp && unzip -oq op.zip op && sudo mv op /usr/local/bin/op)
+          SECRET=$(op read "op://cicd/octopusenergy/password")
+          EMAIL=$(op read "op://cicd/octopusenergy/username" 2>/dev/null || true)
+          if [ -n "$SECRET" ]; then
+            # op-loaded values are NOT auto-masked - mask before exporting.
+            echo "::add-mask::$SECRET"
+            echo "OCTOPUS_SECRET=$SECRET" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$EMAIL" ]; then
+            echo "OCTOPUS_EMAIL=$EMAIL" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run real-API canary
+        env:
+          SPLUNK_MGMT_URL: https://127.0.0.1:8089
+          SPLUNK_USER: admin
+          SPLUNK_PASSWORD: Changeme1!
+          OCTOPUS_LIVE_CANARY: "1"
+        run: pytest tests/test_live_real.py -v -ra
 
       - name: Tear down
         if: always()
