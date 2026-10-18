@@ -686,6 +686,6 @@
     "version": "1.0.0R86590ab",
     "displayName": "Octopus Energy",
     "schemaVersion": "2.0.0",
-    "supportedPythonVersion": ["3.9"]
+    "supportedPythonVersion": ["3.13"]
   }
 }
