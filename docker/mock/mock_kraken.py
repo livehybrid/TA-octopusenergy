@@ -18,8 +18,10 @@ Pure stdlib (no pip install in the mock container).
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
+import calendar
 import json
 import time
+import urllib.parse
 
 ACCOUNT_NUMBER = "A-MOCK0001"
 ELEC_MPAN = "1200012345678"
@@ -87,11 +89,31 @@ def _agile_rates():
     ]}
 
 
-def _consumption():
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+# Like a real meter fitted recently: readings exist only for the last 30 days,
+# so a collector that starts from an old checkpoint sees empty windows first.
+DATA_DAYS = 30
+
+
+def _consumption(path):
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+    now = time.time()
+    data_start = now - DATA_DAYS * 86400
+
+    def ts(name, default):
+        v = (q.get(name) or [None])[0]
+        if not v:
+            return default
+        v = v.replace("Z", "")[:19]
+        return calendar.timegm(time.strptime(v, "%Y-%m-%dT%H:%M:%S"))
+
+    period_from, period_to = ts("period_from", data_start), ts("period_to", now)
+    if period_to <= data_start or period_from >= now:
+        return {"count": 0, "next": None, "previous": None, "results": []}
+    fmt = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+    # Newest first, as the real API returns by default.
     return {"count": 2, "next": None, "previous": None, "results": [
-        {"consumption": 0.123, "interval_start": now, "interval_end": now},
-        {"consumption": 0.456, "interval_start": now, "interval_end": now},
+        {"consumption": 0.456, "interval_start": fmt(now - 3600), "interval_end": fmt(now - 1800)},
+        {"consumption": 0.123, "interval_start": fmt(now - 5400), "interval_end": fmt(now - 3600)},
     ]}
 
 
@@ -121,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         if "standard-unit-rates" in p:
             self._send(_agile_rates())
         elif "/consumption" in p:
-            self._send(_consumption())
+            self._send(_consumption(p))
         elif p.rstrip("/") in ("/v1/graphql", ""):
             self._send({"data": {}})
         else:
