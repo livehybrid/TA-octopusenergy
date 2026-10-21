@@ -173,7 +173,8 @@
             },
             {
               "type": "text",
-              "label": "OctopusEnergy account password",
+              "label": "API key or account password",
+              "help": "An Octopus API key (sk_live_..., from Personal details > API access in your Octopus dashboard) or your account password. With a password, the account name must be your Octopus login email.",
               "required": false,
               "defaultValue": "",
               "field": "account_password",
