@@ -119,3 +119,45 @@ def test_real_credentials_valid():
             return
         failures.append(f"{label}: {errors or 'no token returned'}")
     pytest.fail("Kraken rejected the stored credential in every form — rotate it. " + " | ".join(failures))
+
+
+KEY_ACCOUNT = "realapikey"
+
+
+@pytest.mark.skipif(not SECRET.startswith("sk_"), reason="OCTOPUS_SECRET is not an API key")
+def test_add_on_logs_in_with_an_api_key(splunk):
+    """The add-on itself logs in with an API key and reaches an authenticated query.
+
+    An account holding only the key, plus the simplest authenticated input,
+    makes the collector run obtainKrakenToken and then fill in account_number
+    from the viewer query. account_number is read back over REST, which the
+    collector never uses to read its own config. Before API-key support the
+    collector sent the key as a password and Kraken rejected it.
+    """
+    st, body = splunk.request(
+        "POST", f"{NS}/ta_octopusenergy_account",
+        data={"name": KEY_ACCOUNT, "account_password": SECRET},
+    )
+    assert st in (200, 201), f"create account -> {st}: {body[:200]}"
+    try:
+        data = {"name": "realio", "account": KEY_ACCOUNT, "index": INDEX, "interval": "60"}
+        st, body = splunk.request("POST", f"{NS}/data/inputs/intelligent_octopus", data=data)
+        assert st in (200, 201, 409), f"create intelligent_octopus -> {st}: {body[:200]}"
+        splunk.request("POST", f"{NS}/data/inputs/intelligent_octopus/realio/enable")
+
+        number = ""
+        deadline = time.time() + 240
+        while time.time() < deadline:
+            st, body = splunk.request(
+                "GET", f"{NS}/ta_octopusenergy_account/{KEY_ACCOUNT}?output_mode=json")
+            if st == 200:
+                number = json.loads(body)["entry"][0]["content"].get("account_number", "")
+                if number:
+                    break
+            time.sleep(10)
+        assert number.startswith("A-"), (
+            "the add-on never logged in with the API key: account_number was not "
+            f"filled in within 240s (got {number!r})")
+    finally:
+        splunk.request("DELETE", f"{NS}/data/inputs/intelligent_octopus/realio")
+        splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{KEY_ACCOUNT}")

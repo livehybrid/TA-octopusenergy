@@ -5,6 +5,7 @@ import splunk.Intersplunk as si
 from solnlib import conf_manager
 from splunklib import client as client
 import json
+from octopus_auth import kraken_login_input
 import jwt
 import time
 import os
@@ -118,10 +119,7 @@ class OctopusModInput(BaseModInput):
             'payload' : {
                 "operationName":"Login",
                 "variables":{
-                    "input":{
-                        "email":self.account,
-                        "password":self.account_password
-                    }
+                    "input":kraken_login_input(self.account, self.account_password)
                 },
                 "query":"mutation Login($input: ObtainJSONWebTokenInput!) { obtainKrakenToken(input: $input) { refreshExpiresIn refreshToken token } }"
             }
