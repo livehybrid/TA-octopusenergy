@@ -111,7 +111,7 @@ def test_intelligent_octopus_ingests(splunk, configured):
 def test_meter_readings_reach_data_after_empty_years(splunk, configured):
     # A fresh input starts at 2020-01-01 and asks a year at a time. Years with no
     # readings must move the checkpoint on; otherwise it re-asks for 2020 forever.
-    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:meter_reading:Electric" source=elec1 | spath',
+    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:meter_reading:Electric" source="meter_readings://elec1" | spath',
                      timeout=300, earliest="-1d")  # readings are timestamped up to 90 min ago
     if not hits:
         rows = splunk.search(
