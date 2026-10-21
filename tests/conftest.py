@@ -55,6 +55,17 @@ class Splunk:
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode("utf-8", "replace")
 
+    def request_json(self, method, path, body):
+        """Send a JSON body (the KV store data endpoints need one)."""
+        req = urllib.request.Request(MGMT + path, data=body.encode(), method=method)
+        req.add_header("Authorization", _AUTH)
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, context=_CTX, timeout=90) as r:
+                return r.status, r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode("utf-8", "replace")
+
     def get_json(self, path, **params):
         params.setdefault("output_mode", "json")
         status, body = self.request("GET", path, params=params)

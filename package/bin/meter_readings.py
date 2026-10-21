@@ -71,8 +71,8 @@ class METER_READINGS(OctopusModInput):
             serial = self.meter_serial
             mac = self.meter_mac
             meter_type = self.meter_type
-            checkpoint_key = f"{input_name}_start_time"
-            start_time = self.get_check_point(checkpoint_key)
+            checkpoint_key = self.input_checkpoint_key(input_name)
+            start_time = self.get_input_check_point(input_name)
 
             if not start_time:
                 start_time = "2020-01-01T00:00:00Z" #input_item['start_date']
