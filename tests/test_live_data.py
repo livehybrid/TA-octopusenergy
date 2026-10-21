@@ -16,6 +16,7 @@ live_readings additionally needs meter discovery config; adding it is a follow-u
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 import urllib.parse
@@ -122,3 +123,52 @@ def test_meter_readings_reach_data_after_empty_years(splunk, configured):
         pytest.fail("meter_readings never reached the meter's readings (stuck on an empty window?).\n"
                     f"input elec1 -> {st}: {inp[:400]}\nmeter_readings log lines:\n{diag}")
     assert any(h.get("consumption") is not None for h in hits), f"unexpected reading payload: {hits[0]}"
+
+
+CKPT = f"{NS}/storage/collections/data/TA_octopusenergy_checkpointer"
+
+
+def test_meter_checkpoint_key_has_no_slashes(splunk, configured):
+    # Splunk 10.6.0.5 404s a by-id read of a KV _key containing '://', so a key
+    # like 'meter_readings://elec1_start_time' is written but never read back.
+    deadline = time.time() + 180
+    keys = []
+    while time.time() < deadline:
+        rows = splunk.get_json(CKPT)
+        keys = [r["_key"] for r in rows if "elec1" in r.get("_key", "")]
+        if keys:
+            break
+        time.sleep(10)
+    assert keys, "meter_readings never saved a checkpoint for elec1"
+    assert all("/" not in k for k in keys), f"checkpoint keys contain '/': {keys}"
+
+
+def test_meter_carries_over_an_old_style_checkpoint(splunk, configured):
+    # A position saved under the old 'meter_readings://<name>_start_time' key
+    # must be picked up, or every existing input restarts from 2020.
+    seed = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 2 * 86400))
+    old_key = "meter_readings://elec2_start_time"
+    req_body = json.dumps({"_key": old_key, "state": json.dumps(seed)})
+    st, body = splunk.request_json("POST", CKPT, req_body)
+    assert st in (200, 201), f"seed old checkpoint -> {st}: {body[:200]}"
+    data = {"name": "elec2", "account": ACCOUNT, "index": INDEX,
+            "meter": "Electric#1200012345678#MOCKELEC01#", "interval": "10"}
+    st, body = splunk.request("POST", f"{NS}/data/inputs/meter_readings", data=data)
+    assert st in (200, 201, 409), f"create elec2 -> {st}: {body[:200]}"
+    try:
+        splunk.request("POST", f"{NS}/data/inputs/meter_readings/elec2/enable")
+        deadline = time.time() + 180
+        starts = []
+        while time.time() < deadline:
+            rows = splunk.search(
+                'search index=_internal source=*meter_readings* "start_time=" '
+                '| rex "start_time=(?<st>\\S+)" | search st=* | table _raw st', earliest="-15m", count=200)
+            starts = [r["st"] for r in rows]  # the seed is unique to elec2
+            if seed in starts:
+                break
+            time.sleep(10)
+        assert seed in starts, f"elec2 did not start from the old checkpoint {seed}; starts seen: {sorted(set(starts))[:8]}"
+    finally:
+        splunk.request("DELETE", f"{NS}/data/inputs/meter_readings/elec2")
+        for k in (old_key, "meter_readings__elec2_start_time"):
+            splunk.request("DELETE", CKPT + "/" + urllib.parse.quote(k, safe=""))

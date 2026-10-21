@@ -105,6 +105,39 @@ class OctopusModInput(BaseModInput):
         self.setup_util = Setup_Util(self.splunk_uri, self.session_key)
         self.collect_data(inputs,ew)
 
+    def input_checkpoint_key(self, input_name, suffix="start_time"):
+        """KV store checkpoint key for an input, with no '/' in it.
+
+        Splunk 10.6.0.5 answers 404 when a KV store document whose _key contains
+        '://' is read by id, although the write succeeds and a query finds it.
+        Keys like 'meter_readings://X_start_time' were therefore saved but never
+        read back, and every run started again from 2020.
+        """
+        return "{}_{}".format(input_name.replace("://", "__"), suffix)
+
+    def get_input_check_point(self, input_name, suffix="start_time"):
+        state = self.get_check_point(self.input_checkpoint_key(input_name, suffix))
+        if state is None:
+            # Carry over a position saved under the old key. Read it by query,
+            # because a by-id read of that key is what fails.
+            state = self._query_check_point("{}_{}".format(input_name, suffix))
+            if state is not None:
+                self.log_info(f"Carried over checkpoint {input_name}_{suffix}={state}")
+        return state
+
+    def _query_check_point(self, key):
+        try:
+            rows = self.ckpt._collection_data.query(query=json.dumps({"_key": key}))
+        except Exception as e:
+            self.log_warning(f"Could not look up checkpoint {key} by query: {e}")
+            return None
+        if not rows:
+            return None
+        try:
+            return json.loads(rows[0]["state"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
     @property
     def account_password(self):
         return self.account_config['account_password']
