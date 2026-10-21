@@ -118,6 +118,12 @@ class METER_READINGS(OctopusModInput):
             if len(r_json['results'])>0:
                 last_reading_time = r_json['results'][0]['interval_end']
                 self.save_check_point(checkpoint_key, str(last_reading_time))
+            elif end_dt < now:
+                # An empty window wholly in the past (before the meter was fitted,
+                # or a gap) must not pin the checkpoint, or every run re-asks for
+                # the same empty year and the input never reaches real data.
+                self.log_info(f"No readings between {start_dt} and {end_dt}; moving the checkpoint on")
+                self.save_check_point(checkpoint_key, end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 if __name__ == '__main__':

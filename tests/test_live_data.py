@@ -11,8 +11,8 @@ Coverage here:
   - agile_rates       (public REST tariff endpoint -> octopusenergy:agile_rates)
   - intelligent_octopus (full Login -> account -> dispatches auth flow ->
                          octopusenergy:io:planneddispatch)
-Meter-based collectors (meter_readings / live_readings) additionally need meter
-discovery config; adding them is a follow-up.
+  - meter_readings    (consumption from a meter fitted 30 days ago: empty years first)
+live_readings additionally needs meter discovery config; adding it is a follow-up.
 """
 from __future__ import annotations
 
@@ -55,6 +55,10 @@ def configured(splunk):
                          "index": INDEX, "interval": "30"}),
         ("intelligent_octopus", {"name": "io1", "account": ACCOUNT, "index": INDEX,
                                  "interval": "30"}),
+        # The mock meter only has the last 30 days of readings, so this input
+        # starts several empty years back and must walk forward to reach them.
+        ("meter_readings", {"name": "elec1", "account": ACCOUNT, "index": INDEX,
+                            "meter": "Electric#1200012345678#MOCKELEC01#", "interval": "10"}),
     ]
     for kind, data in inputs:
         st, body = splunk.request("POST", f"{NS}/data/inputs/{kind}", data=data)
@@ -67,11 +71,11 @@ def configured(splunk):
     splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{ACCOUNT}")
 
 
-def _wait_for(splunk, spl, timeout=120):
+def _wait_for(splunk, spl, timeout=120, earliest="-15m"):
     deadline = time.time() + timeout
     hits = []
     while time.time() < deadline:
-        hits = splunk.search(spl, earliest="-15m")
+        hits = splunk.search(spl, earliest=earliest)
         if hits:
             return hits
         time.sleep(10)
@@ -102,3 +106,19 @@ def test_intelligent_octopus_ingests(splunk, configured):
     hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:io:planneddispatch" | spath')
     assert hits, "intelligent_octopus produced no events. Collector log lines:\n" + _collector_diag(splunk)
     assert any(h.get("startDt") for h in hits), f"unexpected dispatch payload: {hits[0]}"
+
+
+def test_meter_readings_reach_data_after_empty_years(splunk, configured):
+    # A fresh input starts at 2020-01-01 and asks a year at a time. Years with no
+    # readings must move the checkpoint on; otherwise it re-asks for 2020 forever.
+    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:meter_reading:Electric" source="meter_readings://elec1" | spath',
+                     timeout=300, earliest="-1d")  # readings are timestamped up to 90 min ago
+    if not hits:
+        rows = splunk.search(
+            "search index=_internal earliest=-15m (source=*meter_readings* OR (component=ExecProcessor meter_readings)) "
+            "| head 40 | table _raw", earliest="-15m", count=40)
+        diag = "\n".join("  " + r.get("_raw", "")[:300] for r in rows) or "  (no meter_readings lines at all)"
+        st, inp = splunk.request("GET", f"{NS}/data/inputs/meter_readings/elec1", params={"output_mode": "json"})
+        pytest.fail("meter_readings never reached the meter's readings (stuck on an empty window?).\n"
+                    f"input elec1 -> {st}: {inp[:400]}\nmeter_readings log lines:\n{diag}")
+    assert any(h.get("consumption") is not None for h in hits), f"unexpected reading payload: {hits[0]}"
