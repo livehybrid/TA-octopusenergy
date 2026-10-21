@@ -71,11 +71,11 @@ def configured(splunk):
     splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{ACCOUNT}")
 
 
-def _wait_for(splunk, spl, timeout=120):
+def _wait_for(splunk, spl, timeout=120, earliest="-15m"):
     deadline = time.time() + timeout
     hits = []
     while time.time() < deadline:
-        hits = splunk.search(spl, earliest="-15m")
+        hits = splunk.search(spl, earliest=earliest)
         if hits:
             return hits
         time.sleep(10)
@@ -112,7 +112,7 @@ def test_meter_readings_reach_data_after_empty_years(splunk, configured):
     # A fresh input starts at 2020-01-01 and asks a year at a time. Years with no
     # readings must move the checkpoint on; otherwise it re-asks for 2020 forever.
     hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:meter_reading:Electric" source=elec1 | spath',
-                     timeout=300)
+                     timeout=300, earliest="-1d")  # readings are timestamped up to 90 min ago
     assert hits, ("meter_readings never reached the meter's readings (stuck on an empty window?). "
                   "Collector log lines:\n" + _collector_diag(splunk))
     assert any(h.get("consumption") is not None for h in hits), f"unexpected reading payload: {hits[0]}"
