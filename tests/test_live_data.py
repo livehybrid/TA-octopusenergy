@@ -113,6 +113,12 @@ def test_meter_readings_reach_data_after_empty_years(splunk, configured):
     # readings must move the checkpoint on; otherwise it re-asks for 2020 forever.
     hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:meter_reading:Electric" source=elec1 | spath',
                      timeout=300, earliest="-1d")  # readings are timestamped up to 90 min ago
-    assert hits, ("meter_readings never reached the meter's readings (stuck on an empty window?). "
-                  "Collector log lines:\n" + _collector_diag(splunk))
+    if not hits:
+        rows = splunk.search(
+            "search index=_internal earliest=-15m (source=*meter_readings* OR (component=ExecProcessor meter_readings)) "
+            "| head 40 | table _raw", earliest="-15m", count=40)
+        diag = "\n".join("  " + r.get("_raw", "")[:300] for r in rows) or "  (no meter_readings lines at all)"
+        st, inp = splunk.request("GET", f"{NS}/data/inputs/meter_readings/elec1", params={"output_mode": "json"})
+        pytest.fail("meter_readings never reached the meter's readings (stuck on an empty window?).\n"
+                    f"input elec1 -> {st}: {inp[:400]}\nmeter_readings log lines:\n{diag}")
     assert any(h.get("consumption") is not None for h in hits), f"unexpected reading payload: {hits[0]}"
