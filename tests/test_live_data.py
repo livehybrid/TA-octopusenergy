@@ -12,7 +12,7 @@ Coverage here:
   - intelligent_octopus (full Login -> account -> dispatches auth flow ->
                          octopusenergy:io:planneddispatch)
   - meter_readings    (consumption from a meter fitted 30 days ago: empty years first)
-live_readings additionally needs meter discovery config; adding it is a follow-up.
+Pagination, checkpoints and live_readings are in test_mock_paging.py.
 """
 from __future__ import annotations
 
@@ -72,11 +72,11 @@ def configured(splunk):
     splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{ACCOUNT}")
 
 
-def _wait_for(splunk, spl, timeout=120, earliest="-15m"):
+def _wait_for(splunk, spl, timeout=120, earliest="-15m", latest="now"):
     deadline = time.time() + timeout
     hits = []
     while time.time() < deadline:
-        hits = splunk.search(spl, earliest=earliest)
+        hits = splunk.search(spl, earliest=earliest, latest=latest)
         if hits:
             return hits
         time.sleep(10)
@@ -97,7 +97,10 @@ def _collector_diag(splunk):
 
 
 def test_agile_rates_ingests(splunk, configured):
-    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:agile_rates" | spath')
+    # Rates are half-hour slots from midnight to 23:00 tomorrow, stamped at
+    # valid_from, so the search reaches back and forward.
+    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:agile_rates" | spath',
+                     earliest="-2d", latest="+3d")
     assert hits, "agile_rates produced no events. Collector log lines:\n" + _collector_diag(splunk)
     assert any(h.get("value_inc_vat") is not None for h in hits), f"unexpected agile payload: {hits[0]}"
 

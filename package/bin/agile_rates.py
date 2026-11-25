@@ -7,6 +7,12 @@ from splunklib import modularinput as smi
 from splunktaucclib.modinput_wrapper.base_modinput import BaseModInput
 from splunktaucclib.splunk_aoblib.setup_util import Setup_Util
 from octopus_modinput import OCTOPUS_API_BASE
+from octopus_paging import iter_pages, parse_api_time, utc_iso
+
+# Days requested per run. Every page is followed, so this only bounds how far
+# one run reaches; future slots that are not published yet come back empty.
+WINDOW_DAYS = 7
+LEGACY_CHECKPOINT_KEY = "start_time"
 
 class AGILE_RATES(BaseModInput):
 
@@ -76,15 +82,6 @@ class AGILE_RATES(BaseModInput):
         return dt + datetime.timedelta(minutes=new_minute - dt.minute)
 
     def stream_events(self, inputs, ew):
-        # input_items = [{'count': len(inputs.inputs)}]
-        # for input_name, input_item in inputs.inputs.items():
-        #     input_item['name'] = input_name
-        #     input_items.append(input_item)
-        # event = smi.Event(
-        #     data=json.dumps(input_items),
-        #     sourcetype='agile_rates',
-        # )
-        # ew.write_event(event)
         # BaseModInput.stream_events normally does this, but we override it and
         # never call super(), so context_meta stayed at its {} default from
         # BaseModInput.__init__. _init_ckpt() reads server_uri/session_key off
@@ -96,73 +93,94 @@ class AGILE_RATES(BaseModInput):
         uri = inputs.metadata["server_uri"]
         session_key = inputs.metadata['session_key']
         self.setup_util = Setup_Util(uri, session_key, self.logger)
-        helper = self
         for input_name, input_item in inputs.inputs.items():
+            self.collect_input(input_name, input_item, ew)
 
-            checkpoint_key = "start_time"
-            start_time = helper.get_check_point(checkpoint_key)
-            if not start_time:
-                # start_date is optional in both globalConfig and the scheme
-                # (required_on_create=False, no default), so an input configured
-                # without one used to raise KeyError here on its very first run,
-                # before any checkpoint existed. Fall back to the start of today,
-                # which matches what the window logic below expects: it fetches
-                # forward a day from start_dt.
-                start_time = input_item.get('start_date')
-            if not start_time:
-                start_time = datetime.datetime.combine(
-                    datetime.date.today(), datetime.time(0, 0)
-                ).strftime("%Y-%m-%d %H:%M:%S")
-            self.log_warning(f"start_time={start_time}")
-            proxy_settings = helper.get_proxy()
-            rate_code = input_item['rate_code']
-            if '.' not in start_time:
-                start_time = start_time + '.0'
-            start_dt = datetime.datetime.strptime(start_time,"%Y-%m-%d %H:%M:%S.%f")
-            helper.log_info(start_dt)
-            now = self.round_minutes(datetime.datetime.now(),'down',30)
-            dt_diff = now - start_dt
-            end_dt = start_dt + datetime.timedelta(days=1)
-            if end_dt < start_dt:
-                helper.log_warning("Not running as start time is later than end time")
-                exit(0)
-            new_rate_announce_time = datetime.datetime.combine(datetime.date.today(), datetime.time(16, 0))
-            if end_dt < now:
-                helper.log_info(f"Getting data for {start_dt} to {end_dt}")
-            elif now > new_rate_announce_time:
-                midnight_tonight = datetime.datetime.combine(datetime.date.today(), datetime.time(16, 0))
-                tomorrow_cutoff = datetime.datetime.combine(datetime.date.today()+datetime.timedelta(days=1), datetime.time(23, 30))
-                if start_dt > tomorrow_cutoff:
-                    helper.log_warning("Start time is after 11pm tomorrow - no info available yet")
-                    #            start_dt = datetime.datetime.combine(datetime.date.today(), datetime.time(23, 0))
-                    #            end_dt = start_dt + datetime.timedelta(days=1)
-                    exit(2)
-                if start_dt >= tomorrow_cutoff:
-                    helper.log_warning("No point looking for more than the cut off")
-                    exit(3)
-                if start_dt < tomorrow_cutoff:
-                    helper.log_warning("Getting tomorrows data")
-                    start_dt = self.round_minutes(datetime.datetime.now(),'down',30)
-                    end_dt = start_dt + datetime.timedelta(days=1)
+    def load_start(self, input_name, input_item):
+        """Where this input resumes, as a naive UTC datetime.
 
-            if end_dt-start_dt == 0:
-                helper.log_warning("Nothing to do!")
-                exit(0)
-            url=OCTOPUS_API_BASE+"/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(rate_code,rate_code,start_dt.isoformat(), end_dt.isoformat())
-            helper.log_debug(f"Getting url={url}")
-            method = "GET"
-            response = helper.send_http_request(url, method, parameters=None, payload=None,
-                                                headers=None, cookies=None, verify=True, cert=None,
-                                                timeout=30, use_proxy=False)
+        Each input has its own checkpoint. Before 1.1 every agile input shared
+        one key, 'start_time', so a second input resumed from the first one's
+        position and skipped its own range. The first input to run after an
+        upgrade takes that shared position over, so an existing input carries
+        on where it was.
+        """
+        key = agile_checkpoint_key(input_name)
+        start_time = self.get_check_point(key)
+        if not start_time:
+            start_time = self.get_check_point(LEGACY_CHECKPOINT_KEY)
+            if start_time:
+                # Claim it: save it under this input's key and drop the shared
+                # one, so an input added later starts from its own start_date.
+                self.save_check_point(key, start_time)
+                self.delete_check_point(LEGACY_CHECKPOINT_KEY)
+                self.log_info(f"Carried over shared checkpoint start_time={start_time} for {input_name}")
+        if not start_time:
+            # start_date is optional (no default), so an input without one
+            # starts at the beginning of today.
+            start_time = input_item.get('start_date')
+        if not start_time:
+            return datetime.datetime.combine(datetime.datetime.now(datetime.timezone.utc).date(), datetime.time(0, 0))
+        start_time = str(start_time).strip()
+        if '.' not in start_time:
+            start_time = start_time + '.0'
+        return datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f")
+
+    def collect_input(self, input_name, input_item, ew):
+        """Fetch every published rate from the checkpoint onwards.
+
+        The window is WINDOW_DAYS from the checkpoint and every page is
+        followed. Rates are published up to 23:00 the next day, so the window
+        normally ends in empty future slots; the checkpoint moves to the end of
+        the newest slot written, and the next run starts exactly there. Before
+        this the input reset its start to "now" after 16:00 and fetched the
+        same day again on every run, writing each slot many times over.
+        """
+        rate_code = input_item['rate_code']
+        start_dt = self.load_start(input_name, input_item)
+        end_dt = start_dt + datetime.timedelta(days=WINDOW_DAYS)
+        self.log_warning(f"start_time={start_dt}")
+        url = "{}/v1/products/{}/electricity-tariffs/E-1R-{}-M/standard-unit-rates/?period_from={}&period_to={}".format(
+            OCTOPUS_API_BASE, rate_code, rate_code, utc_iso(start_dt), utc_iso(end_dt))
+        self.log_info(f"Getting rates for {start_dt} to {end_dt}")
+
+        def fetch(page_url):
+            self.log_debug(f"Getting url={page_url}")
+            response = self.send_http_request(page_url, "GET", parameters=None, payload=None,
+                                              headers=None, cookies=None, verify=True, cert=None,
+                                              timeout=30, use_proxy=False)
             response.raise_for_status()
-            r_json = response.json()
-            helper.log_debug(response.content)
+            return response.json()
 
-            for rate in r_json['results']:
-                event = helper.new_event(time=rate['valid_from'], host="localhost", index=input_item['index'], source=input_name, sourcetype="octopusenergy:agile_rates", data=json.dumps(rate))
-                ew.write_event(event)
-            if len(r_json['results'])>0:
-                helper.save_check_point(checkpoint_key, str(end_dt))
+        seen = set()
+        newest_end = None
+        pages = 0
+        for page, rate in iter_pages(fetch, url, api_base=OCTOPUS_API_BASE):
+            pages = page
+            slot = rate.get('valid_from')
+            if slot in seen:
+                # A slot published between two page requests shifts the
+                # newest-first pages by one, so one rate can appear twice.
+                continue
+            seen.add(slot)
+            event = self.new_event(time=slot, host="localhost", index=input_item['index'],
+                                   source=input_name, sourcetype="octopusenergy:agile_rates",
+                                   data=json.dumps(rate))
+            ew.write_event(event)
+            valid_to = rate.get('valid_to')
+            if valid_to:
+                end = parse_api_time(valid_to)
+                if newest_end is None or end > newest_end:
+                    newest_end = end
+        self.log_info(f"Wrote {len(seen)} rates from {pages} page(s)")
+        if newest_end is not None:
+            checkpoint = newest_end.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+            self.save_check_point(agile_checkpoint_key(input_name), checkpoint)
+
+
+def agile_checkpoint_key(input_name):
+    # No '/' in the key: Splunk 10.6.0.5 404s a by-id read of a KV _key with '://'.
+    return "{}_start_time".format(input_name.replace("://", "__"))
 
 
 if __name__ == '__main__':

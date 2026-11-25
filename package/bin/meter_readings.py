@@ -9,6 +9,7 @@ from splunktaucclib.splunk_aoblib.setup_util import Setup_Util
 from solnlib import conf_manager
 from base64 import b64encode
 from octopus_modinput import OctopusModInput, OCTOPUS_API_BASE
+from octopus_paging import iter_pages, parse_api_time
 APPNAME="TA-octopusenergy"
 
 class METER_READINGS(OctopusModInput):
@@ -106,18 +107,35 @@ class METER_READINGS(OctopusModInput):
             method = "GET"
             self.load_account(input_item['account'])
             headers = { "Authorization" : self.account_config['access_token']}
-            response = self.send_http_request(url, method, parameters=None, payload=None,
-                                                headers=headers, cookies=None, verify=True, cert=None,
-                                                timeout=30, use_proxy=True)
-            response.raise_for_status()
-            r_json = response.json()
 
-            for reading in r_json['results']:
-                event = self.new_event(time=reading['interval_start'], host="localhost", index=input_item['index'], source=input_name, sourcetype=f"octopusenergy:meter_reading:{meter_type}", data=json.dumps(reading))
+            def fetch(page_url):
+                response = self.send_http_request(page_url, method, parameters=None, payload=None,
+                                                  headers=headers, cookies=None, verify=True, cert=None,
+                                                  timeout=30, use_proxy=True)
+                response.raise_for_status()
+                return response.json()
+
+            # Follow every page. The API caps page_size (25000 here) and the
+            # results are newest first, so stopping after page one would keep
+            # the newest readings, checkpoint past them and lose the rest.
+            seen = set()
+            newest_end = None
+            newest_end_raw = None
+            pages = 0
+            for page, reading in iter_pages(fetch, url, api_base=OCTOPUS_API_BASE):
+                pages = page
+                slot = reading.get('interval_start')
+                if slot in seen:
+                    continue
+                seen.add(slot)
+                event = self.new_event(time=slot, host="localhost", index=input_item['index'], source=input_name, sourcetype=f"octopusenergy:meter_reading:{meter_type}", data=json.dumps(reading))
                 ew.write_event(event)
-            if len(r_json['results'])>0:
-                last_reading_time = r_json['results'][0]['interval_end']
-                self.save_check_point(checkpoint_key, str(last_reading_time))
+                end = parse_api_time(reading['interval_end'])
+                if newest_end is None or end > newest_end:
+                    newest_end, newest_end_raw = end, reading['interval_end']
+            self.log_info(f"Wrote {len(seen)} readings from {pages} page(s)")
+            if newest_end_raw is not None:
+                self.save_check_point(checkpoint_key, str(newest_end_raw))
             elif end_dt < now:
                 # An empty window wholly in the past (before the meter was fitted,
                 # or a gap) must not pin the checkpoint, or every run re-asks for

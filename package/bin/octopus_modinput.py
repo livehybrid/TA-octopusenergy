@@ -6,6 +6,7 @@ from solnlib import conf_manager
 from splunklib import client as client
 import json
 from octopus_auth import kraken_login_input
+from octopus_paging import utc_iso
 import jwt
 import time
 import os
@@ -252,8 +253,9 @@ class OctopusModInput(BaseModInput):
                 "operationName":"GetSmartMeterTelemetry",
                 "variables":{
                     "deviceID": self.meter_mac,
-                    "startDate": start_date.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "endDate": end_date.strftime("%Y-%m-%dT%H:%M:%S"),
+                    # Explicit UTC: a bare time was read in the server's zone.
+                    "startDate": utc_iso(start_date),
+                    "endDate": utc_iso(end_date),
                     "grouping":"TEN_SECONDS"
                 },
                 "query":"""
