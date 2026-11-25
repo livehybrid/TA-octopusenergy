@@ -36,5 +36,11 @@ services:
     build: ./mock
     container_name: ta_octopusenergy_mock
     hostname: mock
-    expose:
-      - "8080"
+    environment:
+      # Real caps are 1500 (rates) and 25000 (consumption). Lower ones make an
+      # ordinary window span several pages, so pagination is exercised.
+      MOCK_AGILE_MAX_PAGE_SIZE: "20"
+      MOCK_CONSUMPTION_MAX_PAGE_SIZE: "100"
+    ports:
+      # Published so the suite can read /_mock/dataset and /_mock/requests.
+      - "8080:8080"

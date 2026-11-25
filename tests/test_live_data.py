@@ -12,7 +12,7 @@ Coverage here:
   - intelligent_octopus (full Login -> account -> dispatches auth flow ->
                          octopusenergy:io:planneddispatch)
   - meter_readings    (consumption from a meter fitted 30 days ago: empty years first)
-live_readings additionally needs meter discovery config; adding it is a follow-up.
+Pagination, checkpoints and live_readings are in test_mock_paging.py.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import json
 import os
 import time
 import urllib.parse
+import urllib.request
 
 import pytest
 
@@ -72,11 +73,11 @@ def configured(splunk):
     splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{ACCOUNT}")
 
 
-def _wait_for(splunk, spl, timeout=120, earliest="-15m"):
+def _wait_for(splunk, spl, timeout=120, earliest="-15m", latest="now"):
     deadline = time.time() + timeout
     hits = []
     while time.time() < deadline:
-        hits = splunk.search(spl, earliest=earliest)
+        hits = splunk.search(spl, earliest=earliest, latest=latest)
         if hits:
             return hits
         time.sleep(10)
@@ -97,8 +98,22 @@ def _collector_diag(splunk):
 
 
 def test_agile_rates_ingests(splunk, configured):
-    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:agile_rates" | spath')
-    assert hits, "agile_rates produced no events. Collector log lines:\n" + _collector_diag(splunk)
+    # Rates are half-hour slots from midnight to 23:00 tomorrow, stamped at
+    # valid_from, so the search reaches back and forward.
+    hits = _wait_for(splunk, f'index={INDEX} sourcetype="octopusenergy:agile_rates" source="agile_rates://agile1" | spath',
+                     timeout=240, earliest="-2d", latest="+3d")
+    if not hits:
+        rows = splunk.search(
+            "search index=_internal earliest=-20m (source=*agile_rates* NOT component=ExecProcessor) "
+            "| head 30 | table _raw", earliest="-20m", count=30)
+        log = "\n".join("  " + r.get("_raw", "")[:300] for r in rows) or "  (no agile_rates log lines)"
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8080/_mock/requests", timeout=10) as r:
+                calls = [c.get("path", "") for c in json.load(r) if "AGILE-TEST" in c.get("path", "")]
+        except Exception as exc:  # noqa: BLE001 - diagnostics only
+            calls = [f"(mock log unavailable: {exc})"]
+        pytest.fail(f"agile1 produced no events. Mock saw {len(calls)} agile1 requests {calls[:3]}\n"
+                    f"agile_rates log:\n{log}\nExecProcessor:\n{_collector_diag(splunk)}")
     assert any(h.get("value_inc_vat") is not None for h in hits), f"unexpected agile payload: {hits[0]}"
 
 

@@ -6,6 +6,7 @@ import os
 import datetime
 from splunklib import modularinput as smi
 from octopus_modinput import OctopusModInput
+from octopus_paging import parse_api_time
 
 APPNAME="TA-octopusenergy"
 
@@ -72,13 +73,20 @@ class LIVE_READINGS(OctopusModInput):
                 meter_type = self.meter_type
                 checkpoint_key = self.input_checkpoint_key(input_name)
                 start_time = self.get_input_check_point(input_name)
+                # Everything is aware UTC. The first run used to start from a
+                # naive local time, so when its window held no telemetry (a
+                # Home Mini that was offline or newly fitted) the checkpoint was
+                # saved with no offset, which the strict '%z' parse here then
+                # rejected on every later run: the input never collected again.
+                # parse_api_time takes a value with or without an offset, so an
+                # input already stuck that way recovers.
                 if not start_time:
-                    start_dt = datetime.datetime.now() - datetime.timedelta(hours=48)  #input_item['start_date']
+                    start_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=48)
                     self.log_info(f"setting start_time={start_time}")
                 else:
-                    start_dt = datetime.datetime.strptime(start_time,"%Y-%m-%dT%H:%M:%S%z") + datetime.timedelta(seconds=10) #.replace(tzinfo=None)
+                    start_dt = parse_api_time(start_time) + datetime.timedelta(seconds=10)
 
-                now = datetime.datetime.now(start_dt.tzinfo)
+                now = datetime.datetime.now(datetime.timezone.utc)
                 end_dt = start_dt + datetime.timedelta(hours=3)
 
                 if end_dt < start_dt:
@@ -104,7 +112,7 @@ class LIVE_READINGS(OctopusModInput):
                         ew.write_event(event)
                         last_reading_time = reading['readAt']
                     if not last_reading_time:
-                        last_reading_time = end_dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                        last_reading_time = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
                     self.log_info(f"Setting checkpoint to {last_reading_time}")
                     self.save_check_point(checkpoint_key, str(last_reading_time))
             except(Exception) as e:

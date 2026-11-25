@@ -295,8 +295,8 @@
               "type": "text",
               "label": "Agile Tariff Code",
               "field": "rate_code",
-              "help": "e.g. E-1R-AGILE-22-07-22-M",
-              "tooltip": "e.g. E-1R-AGILE-22-07-22-M",
+              "help": "Agile product code, e.g. AGILE-24-10-01 (the add-on builds the region M tariff code from it)",
+              "tooltip": "Agile product code, e.g. AGILE-24-10-01",
               "required": true
             },
             {

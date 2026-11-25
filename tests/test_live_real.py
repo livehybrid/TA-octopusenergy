@@ -161,3 +161,95 @@ def test_add_on_logs_in_with_an_api_key(splunk):
     finally:
         splunk.request("DELETE", f"{NS}/data/inputs/intelligent_octopus/realio")
         splunk.request("DELETE", f"{NS}/ta_octopusenergy_account/{KEY_ACCOUNT}")
+
+
+# ------------------------------------------------------- real pagination
+#
+# The collectors follow `next` through octopus_paging.iter_pages. These checks
+# drive that same helper against the real API with a small page_size, so a
+# change in how Octopus paginates (link shape, caps, ordering) shows here.
+# Structure and counts only: nothing from the account is printed or asserted
+# by value.
+
+import pathlib  # noqa: E402
+import sys  # noqa: E402
+import urllib.parse  # noqa: E402
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "package" / "bin"))
+from octopus_paging import iter_pages  # noqa: E402
+
+API = "https://api.octopus.energy"
+
+
+def _fetch(auth=None):
+    def fetch(url):
+        req = urllib.request.Request(url, headers={"Authorization": auth} if auth else {})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            body = json.load(r)
+        fetch.bodies.append(body)
+        return body
+    fetch.bodies = []
+    return fetch
+
+
+def _check_pages(fetch, rows, field, step=1800):
+    bodies = fetch.bodies
+    assert len(bodies) > 1, f"expected several pages, got {len(bodies)}"
+    count = bodies[0]["count"]
+    assert len(rows) == count, f"followed pages yielded {len(rows)} rows, count says {count}"
+    assert bodies[-1]["next"] is None, "last page still has a next link"
+    links_keep_window = all(
+        {"period_from", "period_to", "page", "page_size"} <= set(urllib.parse.parse_qs(urllib.parse.urlsplit(b["next"]).query))
+        for b in bodies[:-1])
+    assert links_keep_window, "a next link dropped the period or page_size parameters"
+    starts = [r[field] for _, r in rows]
+    assert len(set(starts)) == len(starts), "a slot appeared on two pages"
+    from octopus_paging import parse_api_time
+    times = sorted(parse_api_time(s).timestamp() for s in starts)
+    gaps = sum(1 for a, b in zip(times, times[1:]) if b - a != step)
+    return gaps
+
+
+def test_real_agile_rates_paginate():
+    """A four-day agile range at 50 per page spans four pages and is complete."""
+    url = (f"{API}/v1/products/{RATE_CODE}/electricity-tariffs/E-1R-{RATE_CODE}-M/standard-unit-rates/"
+           "?period_from=2026-11-01T00:00:00Z&period_to=2026-11-05T00:00:00Z&page_size=50")
+    fetch = _fetch()
+    rows = list(iter_pages(fetch, url, api_base=API))
+    gaps = _check_pages(fetch, rows, "valid_from")
+    assert len(rows) == 4 * 48 and gaps == 0, f"{len(rows)} slots with {gaps} gaps"
+
+
+def _real_meter(token):
+    q = ("query A($n: String!) { account(accountNumber: $n) { properties { "
+         "electricityMeterPoints { mpan meters { serialNumber } } } } }")
+
+    def gql(query, variables):
+        req = urllib.request.Request(GRAPHQL, data=json.dumps({"query": query, "variables": variables}).encode(),
+                                     headers={"Content-Type": "application/json", "Authorization": token})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)["data"]
+    number = gql("query { viewer { accounts { number } } }", {})["viewer"]["accounts"][0]["number"]
+    for prop in gql(q, {"n": number})["account"]["properties"]:
+        for point in prop["electricityMeterPoints"]:
+            for meter in point["meters"]:
+                return point["mpan"], meter["serialNumber"]
+    return None
+
+
+@pytest.mark.skipif(not SECRET.startswith("sk_"), reason="OCTOPUS_SECRET is not an API key")
+def test_real_consumption_paginates():
+    """Real consumption, shaped like the collector's request but 100 per page."""
+    token, errors = _kraken_login({"APIKey": SECRET})
+    assert token, "login failed"
+    meter = _real_meter(token["token"])
+    if not meter:
+        pytest.skip("account has no electricity meter")
+    url = (f"{API}/v1/electricity-meter-points/{meter[0]}/meters/{meter[1]}/consumption/"
+           "?period_from=2026-10-01T00:00:00&period_to=2026-10-08T00:00:00&page_size=100")
+    fetch = _fetch(auth=token["token"])
+    rows = list(iter_pages(fetch, url, api_base=API))
+    if len(fetch.bodies) < 2:
+        pytest.skip("meter has fewer than 100 readings in the week checked")
+    # Real meters have outages, so gaps are allowed here; duplicates are not.
+    _check_pages(fetch, rows, "interval_start")
