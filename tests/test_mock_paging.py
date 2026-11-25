@@ -195,18 +195,32 @@ def test_agile_next_run_starts_at_the_checkpoint_and_adds_nothing(splunk, config
     assert set(counts) == expected and set(counts.values()) == {1}, _describe(counts, expected)
 
 
+def _agile_indexed(splunk, name, first, timeout):
+    """Wait for every published slot from `first` to be indexed; no checkpoint read."""
+    deadline = time.time() + timeout
+    counts, expected = {}, set()
+    while time.time() < deadline:
+        expected = _expected(first, _epoch(_mock("/_mock/dataset")["agile"]["last_valid_to"]))
+        counts = _slot_counts(splunk, f"agile_rates://{name}", "valid_from")
+        if set(counts) >= expected:
+            break
+        time.sleep(10)
+    return counts, expected
+
+
 def test_agile_inputs_keep_their_own_checkpoints(splunk, configured):
-    # A second input created once the first has a checkpoint must start from its
-    # own start_date, not from the first input's position.
+    # A second input created once the first has collected everything must start
+    # from its own start_date, not from the first input's position. Neither
+    # step reads a checkpoint key: progress is judged from indexed events.
     first = calendar.timegm(AGILE_START.timetuple())
-    assert _agile_settled(splunk, "agile_pg", first)[0], "agile_pg never checkpointed"
+    counts, expected = _agile_indexed(splunk, "agile_pg", first, timeout=300)
+    assert set(counts) >= expected, "agile_pg never caught up: " + _describe(counts, expected)
     data = {"name": "agile_pg2", "account": ACCOUNT, "rate_code": AGILE_CODE_2,
             "start_date": AGILE_START_2.strftime("%Y-%m-%d %H:%M:%S"), "index": INDEX, "interval": "20"}
     st, body = splunk.request("POST", f"{NS}/data/inputs/agile_rates", data=data)
     assert st in (200, 201, 409), f"create agile_pg2 -> {st}: {body[:200]}"
     splunk.request("POST", f"{NS}/data/inputs/agile_rates/agile_pg2/enable")
-    first2 = calendar.timegm(AGILE_START_2.timetuple())
-    ckpt, counts, expected = _agile_settled(splunk, "agile_pg2", first2, timeout=180)
+    counts, expected = _agile_indexed(splunk, "agile_pg2", calendar.timegm(AGILE_START_2.timetuple()), timeout=180)
     starts = sorted({_query_of(r["path"]).get("period_from") for r in _requests(
         lambda r: "E-1R-" + AGILE_CODE_2 + "-M" in r.get("path", ""))})
     assert set(counts) == expected and set(counts.values()) == {1}, (
