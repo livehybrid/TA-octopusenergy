@@ -146,9 +146,12 @@ class AGILE_RATES(BaseModInput):
 
         def fetch(page_url):
             self.log_debug(f"Getting url={page_url}")
+            # Through the Proxy tab's proxy like every other collector. This
+            # was use_proxy=False, so agile rates went direct even with a proxy
+            # configured, and failed wherever only the proxy can reach out.
             response = self.send_http_request(page_url, "GET", parameters=None, payload=None,
                                               headers=None, cookies=None, verify=True, cert=None,
-                                              timeout=30, use_proxy=False)
+                                              timeout=30, use_proxy=True)
             response.raise_for_status()
             return response.json()
 
