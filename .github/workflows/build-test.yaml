@@ -157,6 +157,7 @@ jobs:
           docker exec $C /opt/splunk/bin/splunk search \
             'search index=_internal (source=*ta-octopusenergy* OR source=*ta_octopusenergy* OR component=ExecProcessor) (octopus OR OctopusEnergy) earliest=-15m | head 25 | table _time component _raw' \
             -auth admin:Changeme1! 2>&1 | head -40 || true
+          docker logs ta_octopusenergy_proxy 2>&1 | tail -40 || true
 
       - name: Tear down
         if: always()

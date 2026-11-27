@@ -259,7 +259,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _record(self, entry):
         with _LOCK:
-            REQUESTS.append(dict(entry, at=time.time()))
+            # client: the address the request came from, so the proxy tests
+            # can tell a request relayed by the proxy from a direct one.
+            REQUESTS.append(dict(entry, at=time.time(), client=self.client_address[0]))
 
     def do_POST(self):  # noqa: N802
         if self.path == "/_mock/reset":
