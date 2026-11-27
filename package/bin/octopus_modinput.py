@@ -83,12 +83,17 @@ class OctopusModInput(BaseModInput):
 
         self.account_config = self.get_account_config()
 
-        # Check if access_token needs extending
-        if 'access_key' in self.account_config and self.account_config['access_key'] != "":
-            self.check_token_validity()
-        else:
-            self.get_new_access_token()
-            self.account_config = self.get_account_config()
+        # Reuse the stored access token until it expires. This used to test for
+        # 'access_key', a field no account has, so every run logged in again.
+        token = self.account_config.get('access_token') or ""
+        if token and token not in ("******", "********"):
+            try:
+                self.check_token_validity()
+                return
+            except jwt.exceptions.DecodeError:
+                self.log_warning(f"Stored access token for account={self.account} is not a JWT; logging in again")
+        self.get_new_access_token()
+        self.account_config = self.get_account_config()
 
     def set_meter(self, meter_def):
         """
