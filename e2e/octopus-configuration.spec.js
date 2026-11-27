@@ -9,13 +9,13 @@ const path = require('path');
 const { test, expect } = require('@playwright/test');
 const ucc = require('./ucc/ucc-helpers');
 
-const GC = require(path.join(__dirname, '..', 'globalConfig.json'));
+const GC = ucc.loadGlobalConfig(path.join(__dirname, '..'));
 const APP = GC.meta.name;
 const ROOT = GC.meta.restRoot.toLowerCase();
 const SETTINGS_CONF = `${ROOT}_settings`;
 const ACCOUNT_CONF = `${ROOT}_account`;
 const PAGE_TITLE = GC.pages.configuration.title;
-const tab = (name) => GC.pages.configuration.tabs.find((t) => t.name === name);
+const tab = (name) => ucc.configTab(GC, name);
 const entity = (tabName, field) => tab(tabName).entity.find((e) => e.field === field);
 
 // Visible label -> conf key, written out rather than looked up by field in
@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
     await ucc.login(page);
 });
 
-const title = (t) => t.title || (t.type === 'loggingTab' ? 'Logging' : t.name);
+const title = ucc.tabTitle;
 
 test('Configuration page loads every tab without app errors', async ({ page }) => {
     const errs = ucc.watchAppErrors(page, APP);
@@ -55,8 +55,10 @@ test('Configuration page loads every tab without app errors', async ({ page }) =
         await ucc.openTab(page, title(t));
         if (t.table) {
             await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
+        } else if (t.type === 'loggingTab') {
+            await expect(ucc.controlGroup(page, LOGGING.loglevel)).toBeVisible();
         } else {
-            for (const e of t.entity) await expect(ucc.controlGroup(page, e.label)).toBeVisible();
+            for (const e of t.entity || []) await expect(ucc.controlGroup(page, e.label)).toBeVisible();
         }
     }
     errs.assertNone();
@@ -95,7 +97,7 @@ test('Proxy tab saves a dotted host, survives a reload, and the password never c
         expect(ucc.isTrue(got.proxy_enabled), 'proxy_enabled').toBe(true);
         expect(ucc.isTrue(got.proxy_rdns), 'proxy_rdns').toBe(true);
         await ucc.expectSecretNotEchoed(page, rest, { app: APP, conf: SETTINGS_CONF, stanza: 'proxy',
-            field: 'proxy_password', secret, handlerPath: `/servicesNS/nobody/${APP}/${ROOT}_settings/proxy` });
+            field: 'proxy_password', secret, dom: false, handlerPath: `/servicesNS/nobody/${APP}/${ROOT}_settings/proxy` });
 
         await page.reload();
         await ucc.openTab(page, title(tab('proxy')));

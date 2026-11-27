@@ -13,7 +13,7 @@ const path = require('path');
 const { test, expect } = require('@playwright/test');
 const ucc = require('./ucc/ucc-helpers');
 
-const GC = require(path.join(__dirname, '..', 'globalConfig.json'));
+const GC = ucc.loadGlobalConfig(path.join(__dirname, '..'));
 const APP = GC.meta.name;
 const ROOT = GC.meta.restRoot.toLowerCase();
 const ACCOUNT_CONF = `${ROOT}_account`;
@@ -129,8 +129,13 @@ for (const service of GC.pages.inputs.services) {
         const good = `e2e_badinterval_${Date.now().toString(36)}`;
         await fillTexts(d, label, { name: good, interval: 'hourly' });
         await d.getByRole('button', { name: 'Add', exact: true }).click();
-        const intMsg = service.entity.find((x) => x.field === 'interval').validators[0].errorMsg;
-        await expect(d.getByText(intMsg).first()).toBeVisible();
+        // The built globalConfig may carry the interval check as a field type
+        // rather than a validator with its own message: then the dialog
+        // staying open and nothing being written is the check.
+        const intMsg = ((service.entity.find((x) => x.field === 'interval') || {}).validators || [])
+            .map((v) => v.errorMsg).find(Boolean);
+        if (intMsg) await expect(d.getByText(intMsg).first()).toBeVisible();
+        await expect(d).toBeVisible();
         await page.waitForTimeout(3000);
         expect(await stanza(bad)).toBeNull();
         expect(await stanza(good)).toBeNull();
@@ -139,6 +144,10 @@ for (const service of GC.pages.inputs.services) {
 }
 
 test('tokens the add-on fetches for an account are stored encrypted, never in the plain conf', async () => {
+    // Diagnostics, never values: what the conf holds for each token, and whether
+    // the add-on logged a login for this account.
+    const logins = await rest.search(`index=_internal "New token for account=${ACCOUNT_NAME}" | stats count`, '-2h');
+    const loginCount = logins.length ? Number(logins[0].count) : 0;
     // The Meter dropdown above made the add-on log in to the mock and write the
     // access and refresh tokens back into the account. The mock's token is a
     // JWT ("eyJ..."), so a plain-text write is recognisable without knowing it.
@@ -149,7 +158,10 @@ test('tokens the add-on fetches for an account are stored encrypted, never in th
             || String(raw[f] || '') === 'mock-refresh-token', `${f} is in plain text in ${ACCOUNT_CONF}.conf`).toBe(false);
     }
     const stored = (await ucc.readCredential(rest, APP, ACCOUNT_CONF, ACCOUNT_NAME)) || {};
-    expect(Object.keys(stored).sort(), 'encrypted fields held in storage/passwords').toEqual(
+    const shape = (v) => (v === undefined ? 'absent' : v === '' ? 'empty' : /^\*+$/.test(String(v)) ? 'mask' : 'other');
+    const diag = `logins logged=${loginCount}; conf access_token=${shape(raw.access_token)} refresh_token=${shape(raw.refresh_token)}`
+        + ` account_number=${shape(raw.account_number)}; stored keys=${Object.keys(stored).join(',')}`;
+    expect(Object.keys(stored).sort(), `encrypted fields held in storage/passwords (${diag})`).toEqual(
         expect.arrayContaining(['access_token', 'account_password', 'refresh_token']));
     expect(String(stored.access_token || '').startsWith('eyJ'), 'stored access_token is the mock JWT').toBe(true);
 });

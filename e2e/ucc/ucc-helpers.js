@@ -30,6 +30,32 @@ const MASK = '******';
 
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * The globalConfig.json the page actually loads. ucc-gen migrates an older
+ * globalConfig.json while it builds (a named logging tab becomes a typed
+ * loggingTab, field types and validators change), so prefer the built copy in
+ * stage/ or output/ and fall back to the repo's source file.
+ */
+function loadGlobalConfig(repoDir) {
+    const fs = require('fs');
+    const path = require('path');
+    const src = JSON.parse(fs.readFileSync(path.join(repoDir, 'globalConfig.json'), 'utf8'));
+    for (const top of ['stage', 'output']) {
+        const built = path.join(repoDir, top, src.meta.name, 'appserver', 'static', 'js', 'build', 'globalConfig.json');
+        if (fs.existsSync(built)) return JSON.parse(fs.readFileSync(built, 'utf8'));
+    }
+    return src;
+}
+
+/** A Configuration tab by name, or the logging tab by name or type. */
+function configTab(gc, name) {
+    return gc.pages.configuration.tabs.find((t) => t.name === name
+        || (name === 'logging' && t.type === 'loggingTab'));
+}
+
+/** A tab's visible title (UCC titles a typed loggingTab "Logging"). */
+const tabTitle = (t) => t.title || (t.type === 'loggingTab' ? 'Logging' : t.name);
+
 // ---------------------------------------------------------------------------
 // Session and navigation
 // ---------------------------------------------------------------------------
@@ -89,10 +115,22 @@ const labelRe = (label) => new RegExp(`^\\s*\\*?\\s*${escapeRe(label)}\\s*\\*?\\
  *  filter({ has }) must be built from the page, not from the scope. */
 const pageOf = (scope) => (typeof scope.page === 'function' ? scope.page() : scope);
 
-/** The control-group wrapper (react-ui ControlGroup) whose <label> reads `label`. */
+/** An XPath string literal for `s` (handles both quote kinds). */
+function xpathLiteral(s) {
+    if (!s.includes('"')) return `"${s}"`;
+    if (!s.includes("'")) return `'${s}'`;
+    return `concat(${s.split('"').map((p) => `"${p}"`).join(', \'"\', ')})`;
+}
+
+/** The control-group wrapper (react-ui ControlGroup) whose <label> reads
+ *  `label`. A field with a tooltip carries the tooltip text inside the
+ *  <label> as screen-reader content, so the label's own text node is matched
+ *  as well as its whole text. */
 function controlGroup(scope, label) {
-    return scope.locator('[data-test="control-group"]')
-        .filter({ has: pageOf(scope).locator('label').filter({ hasText: labelRe(label) }) });
+    const page = pageOf(scope);
+    const whole = page.locator('label').filter({ hasText: labelRe(label) });
+    const own = page.locator(`xpath=.//label[text()[normalize-space()=${xpathLiteral(label)}]]`);
+    return scope.locator('[data-test="control-group"]').filter({ has: whole.or(own) });
 }
 
 /** The input control labelled `label` inside `scope` (a page, a dialog or a
@@ -352,11 +390,13 @@ async function expectSecretGone(rest, { app, conf, stanza, realms }) {
  * `handlerPath` is e.g. /servicesNS/nobody/<app>/<restRoot>_account/<name>.
  * Reload the page and call domHolds() again to cover "after reload".
  */
-async function expectSecretNotEchoed(page, rest, { app, conf, stanza, handlerPath, field, secret, realms, credStanza }) {
+async function expectSecretNotEchoed(page, rest, { app, conf, stanza, handlerPath, field, secret, realms, credStanza, dom = true }) {
     // Every check runs and every failure is reported together, so a defect
     // shows each place the secret leaked, not just the first one checked.
+    // dom: false on a settings tab straight after Save, where the field still
+    // holds what was typed; check the DOM after a reload instead.
     const failures = [];
-    if (await domHolds(page, secret)) failures.push(`secret for ${field} is in the DOM`);
+    if (dom && await domHolds(page, secret)) failures.push(`secret for ${field} is in the DOM`);
     const viaHandler = await rest.get(handlerPath);
     if (viaHandler.status !== 200) {
         failures.push(`GET ${handlerPath}: ${viaHandler.status}`);
@@ -406,6 +446,7 @@ module.exports = {
     control, fillText, readText, selectOption, fillForm, saveConfigTab,
     dialog, openCreateInput, submitDialog, inputRow, rowAction, toggleRow,
     restClient, isTrue, expectConf, expectSecretNotEchoed, controlGroup, labelRe,
+    loadGlobalConfig, configTab, tabTitle,
     domHolds, credentialEntries, readCredential, expectSecretStored, expectSecretGone, setCheckbox,
 };
 
