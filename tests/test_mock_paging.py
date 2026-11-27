@@ -315,3 +315,30 @@ def test_live_readings_fields(splunk, configured):
         ev = json.loads(row["_raw"])
         assert isinstance(ev["consumption"], int), f"consumption not converted to int: {ev}"
         assert set(ev) == {"readAt", "consumption", "demand"}, sorted(ev)
+
+
+def test_account_reuses_its_token_instead_of_logging_in_every_run(splunk, configured):
+    """The stored access token is used until it expires.
+
+    load_account() used to test for a key named 'access_key', which an account
+    never has, so every run of every input (and every Meter dropdown) logged in
+    to Kraken again. Counted from the mock's own request log, which the
+    collectors never read. The mock's token expires in ten years.
+    """
+    def logins():
+        return len(_requests(lambda r: r.get("op") == "Login"))
+
+    def telemetry():
+        return len(_requests(lambda r: r.get("op") == "GetSmartMeterTelemetry"))
+
+    # Positive control: the inputs have logged in at least once already.
+    assert logins() >= 1, "no Login ever reached the mock" + "\n" + _diag(splunk, "octopus")
+    before_logins, before_runs = logins(), telemetry()
+    deadline = time.time() + 120
+    while time.time() < deadline and telemetry() < before_runs + 3:
+        time.sleep(5)
+    # Positive control: the 10 s inputs really ran again in the window.
+    assert telemetry() >= before_runs + 3, "live_readings did not run again" + "\n" + _diag(splunk, "octopus")
+    assert logins() == before_logins, (
+        f"{logins() - before_logins} new Login(s) over {telemetry() - before_runs} more runs: "
+        "the stored token is not being reused")
