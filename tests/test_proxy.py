@@ -137,7 +137,8 @@ def _run_phase(splunk, name):
         # splunkd; nothing else is calling GraphQL yet in this phase.
         st, body = splunk.request("GET", f"{NS}/ta_octopusenergy_account_info",
                                   params={"account": ACCOUNT, "output_mode": "json"})
-        out["dropdown"] = (st, body[:300])
+        meters = [e["name"] for e in json.loads(body).get("entry", [])] if st == 200 else body[:300]
+        out["dropdown"] = (st, meters)
         out["dropdown_log"] = proxy_log()[log_from:]
         out["dropdown_mock"] = [r for r in mock_requests() if r["at"] >= started and r.get("op")]
 
@@ -226,7 +227,7 @@ def test_graphql_collector_goes_through_the_proxy(phases, splunk, name, port, us
 def test_meter_dropdown_handler_goes_through_the_proxy(phases):
     p = phases["open"]
     st, body = p["dropdown"]
-    assert st == 200 and "metername" in body, f"Meter dropdown handler -> {st}: {body}"
+    assert st == 200 and any("MOCKELEC01" in m for m in body), f"Meter dropdown handler -> {st}: {body}"
     assert any(r["op"] == "GetAccountInfo" for r in p["dropdown_mock"]), p["dropdown_mock"]
     direct = [r for r in p["dropdown_mock"] if r.get("client") != phases["ips"]["proxy"]]
     assert not direct, f"the handler reached the mock directly: {direct}"
