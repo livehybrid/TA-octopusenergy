@@ -1,3 +1,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Playwright
+e2e/node_modules/
+e2e/e2e-results/
