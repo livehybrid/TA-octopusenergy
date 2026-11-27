@@ -179,6 +179,7 @@ jobs:
 
       - name: Run real-API canary
         env:
+          REQUIRE_LIVE: "test_live_real"
           SPLUNK_MGMT_URL: https://127.0.0.1:8089
           SPLUNK_USER: admin
           SPLUNK_PASSWORD: Changeme1!
